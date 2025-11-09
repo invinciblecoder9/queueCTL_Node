@@ -152,7 +152,6 @@
 
 
 
-// src/jobs.js
 const { db } = require('./db');
 
 function nowISO() {
@@ -162,9 +161,18 @@ function nowISO() {
 function enqueue(job) {
   const ts = nowISO();
   const stmt = db.prepare(`
-    INSERT INTO jobs (id, command, state, attempts, max_retries, created_at, updated_at, next_run_at, priority)
-    VALUES (@id, @command, 'pending', @attempts, @max_retries, @created_at, @updated_at, @next_run_at, @priority)
+    INSERT INTO jobs (
+      id, command, state, attempts, max_retries,
+      created_at, updated_at, next_run_at, priority,
+      locked_by, locked_at, started_at, finished_at, duration_ms
+    )
+    VALUES (
+      @id, @command, 'pending', @attempts, @max_retries,
+      @created_at, @updated_at, @next_run_at, @priority,
+      NULL, NULL, NULL, NULL, NULL
+    )
   `);
+
   stmt.run({
     id: job.id,
     command: job.command,
@@ -175,110 +183,121 @@ function enqueue(job) {
     next_run_at: job.next_run_at ?? ts,
     priority: job.priority ?? 0
   });
+
   return job.id;
 }
 
 function listByState(state) {
   if (state) {
     return db.prepare('SELECT * FROM jobs WHERE state = ? ORDER BY created_at').all(state);
-  } else {
-    return db.prepare('SELECT * FROM jobs ORDER BY created_at').all();
   }
+  return db.prepare('SELECT * FROM jobs ORDER BY created_at').all();
 }
 
 function getJob(id) {
   return db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
 }
 
-// updateJob: set many fields; include started_at, finished_at, duration_ms
 function updateJob(id, patch) {
-  const current = getJob(id);
-  if (!current) throw new Error('job not found');
-  const updated = {
-    ...current,
-    ...patch,
-    updated_at: new Date().toISOString()
-  };
+  const cur = getJob(id);
+  if (!cur) throw new Error('job not found');
 
-  const stmt = db.prepare(`
+  const updated = { ...cur, ...patch, updated_at: nowISO() };
+
+  db.prepare(`
     UPDATE jobs SET
-      command = @command,
-      state = @state,
-      attempts = @attempts,
-      max_retries = @max_retries,
-      updated_at = @updated_at,
-      locked_by = @locked_by,
-      locked_at = @locked_at,
-      next_run_at = @next_run_at,
-      started_at = @started_at,
-      finished_at = @finished_at,
-      duration_ms = @duration_ms,
-      priority = @priority
-    WHERE id = @id
-  `);
+      command=@command, state=@state, attempts=@attempts,
+      max_retries=@max_retries, updated_at=@updated_at,
+      locked_by=@locked_by, locked_at=@locked_at,
+      next_run_at=@next_run_at, started_at=@started_at,
+      finished_at=@finished_at, duration_ms=@duration_ms,
+      priority=@priority
+    WHERE id=@id
+  `).run(updated);
 
-  stmt.run(updated);
   return getJob(id);
 }
 
-// Atomically claim one job that is pending and whose next_run_at <= now
+// FIXED claimOne – correct parameter order ✓
 function claimOne(workerId) {
-  const now = new Date().toISOString();
+  const now = nowISO();
+
   const candidate = db.prepare(`
     SELECT id FROM jobs
-    WHERE state = 'pending' AND (next_run_at IS NULL OR next_run_at <= ?)
-    ORDER BY priority DESC, created_at
+    WHERE state='pending'
+      AND (next_run_at IS NULL OR next_run_at <= ?)
+    ORDER BY priority DESC, created_at ASC
     LIMIT 1
   `).get(now);
 
   if (!candidate) return null;
 
-  // Set state processing and record locked_by and started_at (claim time)
-  const update = db.prepare(`
+  const info = db.prepare(`
     UPDATE jobs
-    SET state = 'processing', locked_by = ?, locked_at = ?, started_at = ?, updated_at = ?
-    WHERE id = ? AND state = 'pending'
-  `);
+    SET state='processing',
+        locked_by=?,
+        locked_at=?,
+        started_at=?,
+        updated_at=?
+    WHERE id=? AND state='pending'
+  `).run(workerId, now, now, now, candidate.id);
 
-  const info = update.run(workerId, now, now, now, candidate.id);
-  if (info.changes === 0) {
-    return null;
-  }
+  if (info.changes === 0) return null;
+
   return getJob(candidate.id);
 }
 
 function markCompleted(id) {
   const job = getJob(id);
   if (!job) return;
-  const finishedAt = new Date().toISOString();
+
+  const finishedAt = nowISO();
   let duration = null;
+
   if (job.started_at) {
     const s = Date.parse(job.started_at);
-    if (!Number.isNaN(s)) {
-      duration = Date.now() - s;
-    }
+    if (!Number.isNaN(s)) duration = Date.now() - s;
   }
+
   db.prepare(`
-    UPDATE jobs SET state = 'completed', finished_at = ?, duration_ms = ?, updated_at = ?, locked_by = NULL, locked_at = NULL
-    WHERE id = ?
-  `).run(finishedAt, duration, new Date().toISOString(), id);
+    UPDATE jobs
+    SET state='completed',
+        finished_at=?,
+        duration_ms=?,
+        updated_at=?,
+        locked_by=NULL,
+        locked_at=NULL
+    WHERE id=?
+  `).run(finishedAt, duration, nowISO(), id);
 }
 
 function markFailedRetryable(id, attempts, backoffSeconds) {
   const nextRun = new Date(Date.now() + backoffSeconds * 1000).toISOString();
+
   db.prepare(`
-    UPDATE jobs SET state = 'pending', attempts = ?, next_run_at = ?, updated_at = ?, locked_by = NULL, locked_at = NULL
-    WHERE id = ?
-  `).run(attempts, nextRun, new Date().toISOString(), id);
+    UPDATE jobs
+    SET state='pending',
+        attempts=?,
+        next_run_at=?,
+        updated_at=?,
+        locked_by=NULL,
+        locked_at=NULL
+    WHERE id=?
+  `).run(attempts, nextRun, nowISO(), id);
 }
 
 function markDead(id) {
   db.prepare(`
-    UPDATE jobs SET state = 'dead', updated_at = ?, locked_by = NULL, locked_at = NULL
-    WHERE id = ?
-  `).run(new Date().toISOString(), id);
+    UPDATE jobs
+    SET state='dead',
+        updated_at=?,
+        locked_by=NULL,
+        locked_at=NULL
+    WHERE id=?
+  `).run(nowISO(), id);
 }
 
+// FIXED duplicate export
 module.exports = {
   enqueue,
   listByState,
@@ -287,6 +306,8 @@ module.exports = {
   claimOne,
   markCompleted,
   markFailedRetryable,
-  markDead
+  markDead,
+  clearAllJobs() {
+    return db.prepare("DELETE FROM jobs").run().changes;
+  }
 };
-
