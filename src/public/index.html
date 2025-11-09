@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QueueCTL Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>QueueCTL Dashboard</h1>
+  <p class="subtitle">Real-time view of jobs, workers & metrics</p>
+
+  <h2>Metrics</h2>
+  <div id="metrics"></div>
+
+  <h2>Workers</h2>
+  <table id="workersTable">
+    <thead>
+      <tr><th>PID</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Jobs</h2>
+  <table id="jobsTable">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>State</th>
+        <th>Priority</th>
+        <th>Attempts</th>
+        <th>Command</th>
+        <th>Created</th>
+        <th>Duration</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

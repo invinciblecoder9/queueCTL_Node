@@ -1,0 +1,43 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+  background: #f3f6fa;
+  color: #333;
+}
+
+h1 {
+  margin-bottom: 5px;
+}
+
+.subtitle {
+  color: #666;
+  margin-bottom: 20px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 40px;
+  background: #fff;
+}
+
+table th, table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+table th {
+  background: #f0f0f0;
+}
+
+.state-pending { background: #fff7cd; }
+.state-processing { background: #cfe2ff; }
+.state-completed { background: #d1f7c4; }
+.state-dead { background: #ffcccc; }
+
+#metrics {
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #ddd;
+  margin-bottom: 20px;
+}
