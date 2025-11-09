@@ -236,7 +236,6 @@
 
 
 
-// src/cli.js
 const { program } = require('commander');
 const fs = require('fs');
 const path = require('path');
@@ -264,12 +263,6 @@ function readStdin() {
 
 // Parse job from multiple input sources
 async function parseJobInput(jobJsonArg, opts) {
-  // Priority:
-  // 1) --file <path>
-  // 2) jobJsonArg === '-'  -> read stdin
-  // 3) --id && --command flags
-  // 4) jobJsonArg (string) -> parse JSON
-  // 5) stdin (if any)
   if (opts.file) {
     const filePath = path.resolve(process.cwd(), opts.file);
     const raw = fs.readFileSync(filePath, 'utf8');
@@ -289,7 +282,8 @@ async function parseJobInput(jobJsonArg, opts) {
     };
     if (typeof opts.maxRetries !== 'undefined') job.max_retries = opts.maxRetries;
     if (typeof opts.priority !== 'undefined') job.priority = opts.priority;
-    if (typeof opts.runAt !== 'undefined') job.run_at = opts.runAt;
+    // IMPORTANT: map --run-at to next_run_at (not run_at)
+    if (typeof opts.runAt !== 'undefined') job.next_run_at = opts.runAt;
     if (typeof opts.timeout !== 'undefined') job.timeout_seconds = opts.timeout;
     return job;
   }
@@ -298,13 +292,11 @@ async function parseJobInput(jobJsonArg, opts) {
     try {
       return JSON.parse(jobJsonArg);
     } catch (e) {
-      // let fallback to stdin
-      // but throw if stdin empty
       const raw = await readStdin();
       if (raw && raw.trim()) {
         try {
           return JSON.parse(raw);
-        } catch (e2) {
+        } catch {
           throw new Error('Invalid JSON provided as argument and stdin');
         }
       }
@@ -312,7 +304,6 @@ async function parseJobInput(jobJsonArg, opts) {
     }
   }
 
-  // If no arg, try stdin
   const raw = await readStdin();
   if (raw && raw.trim()) {
     return JSON.parse(raw);
@@ -335,15 +326,15 @@ program
   .action(async (jobJsonArg, opts) => {
     try {
       const job = await parseJobInput(jobJsonArg, opts);
-      // supply id if missing
       if (!job.id) job.id = makeId('job-');
       if (!job.command) {
         console.error('Job must include "command" field');
         process.exit(2);
       }
-      // set defaults
       if (typeof job.attempts === 'undefined') job.attempts = 0;
-      if (typeof job.max_retries === 'undefined') job.max_retries = parseInt(getConfig('default_max_retries') || '3', 10);
+      if (typeof job.max_retries === 'undefined') {
+        job.max_retries = parseInt(getConfig('default_max_retries') || '3', 10);
+      }
       const createdId = enqueue(job);
       console.log(`Enqueued job ${createdId}`);
     } catch (err) {
@@ -376,7 +367,6 @@ program
   .command('status')
   .description('Show summary of job states & active workers')
   .action(() => {
-    // lazy require to avoid cycles
     const { listByState } = require('./jobs');
     const all = listByState();
     const counts = all.reduce((acc, j) => {
@@ -392,11 +382,10 @@ program
 program
   .command('list')
   .description('List jobs (optionally by state)')
-  .option('--state <state>', 'pending|processing|completed|failed|dead')
+  .option('--state <state>', 'pending|processing|completed|dead')
   .action((opts) => {
     const { listByState } = require('./jobs');
     const rows = listByState(opts.state);
-    // print minimal table
     console.table(rows.map(r => ({
       id: r.id,
       command: r.command,
@@ -466,23 +455,15 @@ cfg
     console.table(allConfig());
   });
 
-/**
- * Metrics command
- * - job counts by state
- * - completed jobs: avg/min/max duration_ms
- * - overall: total jobs, avg attempts, dead jobs
- */
 program
   .command('metrics')
   .description('Show metrics: job counts by state, and duration stats for completed jobs')
   .action(() => {
     const { db } = require('./db');
-    // counts by state
     const counts = db.prepare('SELECT state, COUNT(*) AS cnt FROM jobs GROUP BY state').all();
     console.log('Job counts by state:');
     console.table(counts);
 
-    // average/min/max duration for completed jobs (ms)
     const dur = db.prepare(`
       SELECT
         COUNT(*) AS completed_count,
@@ -496,7 +477,6 @@ program
     console.log('Completed jobs duration (ms):');
     console.table([dur]);
 
-    // overall stats: total jobs, avg attempts
     const overall = db.prepare(`
       SELECT COUNT(*) AS total_jobs, ROUND(AVG(attempts), 2) AS avg_attempts, SUM(CASE WHEN state='dead' THEN 1 ELSE 0 END) AS dead_jobs
       FROM jobs
@@ -504,6 +484,16 @@ program
 
     console.log('Overall:');
     console.table([overall]);
+  });
+
+// clear (dev)
+program
+  .command('clear')
+  .description('Delete ALL jobs from the database (dev only)')
+  .action(() => {
+    const { clearAllJobs } = require('./jobs');
+    const deleted = clearAllJobs();
+    console.log(`Cleared ${deleted} job(s).`);
   });
 
 program.parse(process.argv);
