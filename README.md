@@ -1,4 +1,11 @@
-# 🚀 queuectl — A Lightweight Background Job Queue with Workers, Retries & DLQ
+# 🚀 QueueCTL — A Lightweight Background Job Queue with Workers, Retries & DLQ
+
+# 🎥 Demo Video
+
+Watch the complete working demo of `queuectl` here:
+
+👉 **Google Drive Link:** https://drive.google.com/your-video-link-here
+
 
 `queuectl` is a **production-grade, CLI-controlled background job queue** built in Node.js.  
 It supports **parallel workers**, **durable job storage**, **exponential backoff retries**, **Dead Letter Queue handling**, **priorities**, **delayed jobs**, **configuration management**, and powerful **metrics**.
@@ -324,3 +331,4 @@ node src/cli.js metrics
 -persistence
 
 Designed to mimic real-world queue systems while remaining minimal and easy to understand.
+
