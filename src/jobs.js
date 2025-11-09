@@ -172,7 +172,6 @@ function enqueue(job) {
       NULL, NULL, NULL, NULL, NULL
     )
   `);
-
   stmt.run({
     id: job.id,
     command: job.command,
@@ -180,18 +179,18 @@ function enqueue(job) {
     max_retries: job.max_retries ?? 3,
     created_at: job.created_at ?? ts,
     updated_at: job.updated_at ?? ts,
-    next_run_at: job.next_run_at ?? ts,
+    next_run_at: job.next_run_at ?? ts,  // IMPORTANT: schedule/backoff
     priority: job.priority ?? 0
   });
-
   return job.id;
 }
 
 function listByState(state) {
   if (state) {
     return db.prepare('SELECT * FROM jobs WHERE state = ? ORDER BY created_at').all(state);
+  } else {
+    return db.prepare('SELECT * FROM jobs ORDER BY created_at').all();
   }
-  return db.prepare('SELECT * FROM jobs ORDER BY created_at').all();
 }
 
 function getJob(id) {
@@ -199,32 +198,42 @@ function getJob(id) {
 }
 
 function updateJob(id, patch) {
-  const cur = getJob(id);
-  if (!cur) throw new Error('job not found');
+  const current = getJob(id);
+  if (!current) throw new Error('job not found');
+  const updated = {
+    ...current,
+    ...patch,
+    updated_at: nowISO()
+  };
 
-  const updated = { ...cur, ...patch, updated_at: nowISO() };
-
-  db.prepare(`
+  const stmt = db.prepare(`
     UPDATE jobs SET
-      command=@command, state=@state, attempts=@attempts,
-      max_retries=@max_retries, updated_at=@updated_at,
-      locked_by=@locked_by, locked_at=@locked_at,
-      next_run_at=@next_run_at, started_at=@started_at,
-      finished_at=@finished_at, duration_ms=@duration_ms,
-      priority=@priority
-    WHERE id=@id
-  `).run(updated);
+      command = @command,
+      state = @state,
+      attempts = @attempts,
+      max_retries = @max_retries,
+      updated_at = @updated_at,
+      locked_by = @locked_by,
+      locked_at = @locked_at,
+      next_run_at = @next_run_at,
+      started_at = @started_at,
+      finished_at = @finished_at,
+      duration_ms = @duration_ms,
+      priority = @priority
+    WHERE id = @id
+  `);
 
+  stmt.run(updated);
   return getJob(id);
 }
 
-// FIXED claimOne – correct parameter order ✓
+// Atomically claim one job that is pending and due
 function claimOne(workerId) {
   const now = nowISO();
 
   const candidate = db.prepare(`
     SELECT id FROM jobs
-    WHERE state='pending'
+    WHERE state = 'pending'
       AND (next_run_at IS NULL OR next_run_at <= ?)
     ORDER BY priority DESC, created_at ASC
     LIMIT 1
@@ -232,14 +241,15 @@ function claimOne(workerId) {
 
   if (!candidate) return null;
 
+  // Correct parameter order
   const info = db.prepare(`
     UPDATE jobs
-    SET state='processing',
-        locked_by=?,
-        locked_at=?,
-        started_at=?,
-        updated_at=?
-    WHERE id=? AND state='pending'
+    SET state = 'processing',
+        locked_by = ?,
+        locked_at = ?,
+        started_at = ?,
+        updated_at = ?
+    WHERE id = ? AND state = 'pending'
   `).run(workerId, now, now, now, candidate.id);
 
   if (info.changes === 0) return null;
@@ -250,54 +260,55 @@ function claimOne(workerId) {
 function markCompleted(id) {
   const job = getJob(id);
   if (!job) return;
-
   const finishedAt = nowISO();
   let duration = null;
-
   if (job.started_at) {
     const s = Date.parse(job.started_at);
-    if (!Number.isNaN(s)) duration = Date.now() - s;
+    if (!Number.isNaN(s)) {
+      duration = Date.now() - s;
+    }
   }
-
   db.prepare(`
     UPDATE jobs
-    SET state='completed',
-        finished_at=?,
-        duration_ms=?,
-        updated_at=?,
-        locked_by=NULL,
-        locked_at=NULL
-    WHERE id=?
+    SET state = 'completed',
+        finished_at = ?,
+        duration_ms = ?,
+        updated_at = ?,
+        locked_by = NULL,
+        locked_at = NULL
+    WHERE id = ?
   `).run(finishedAt, duration, nowISO(), id);
 }
 
 function markFailedRetryable(id, attempts, backoffSeconds) {
   const nextRun = new Date(Date.now() + backoffSeconds * 1000).toISOString();
-
   db.prepare(`
     UPDATE jobs
-    SET state='pending',
-        attempts=?,
-        next_run_at=?,
-        updated_at=?,
-        locked_by=NULL,
-        locked_at=NULL
-    WHERE id=?
+    SET state = 'pending',
+        attempts = ?,
+        next_run_at = ?,
+        updated_at = ?,
+        locked_by = NULL,
+        locked_at = NULL
+    WHERE id = ?
   `).run(attempts, nextRun, nowISO(), id);
 }
 
 function markDead(id) {
   db.prepare(`
     UPDATE jobs
-    SET state='dead',
-        updated_at=?,
-        locked_by=NULL,
-        locked_at=NULL
-    WHERE id=?
+    SET state = 'dead',
+        updated_at = ?,
+        locked_by = NULL,
+        locked_at = NULL
+    WHERE id = ?
   `).run(nowISO(), id);
 }
 
-// FIXED duplicate export
+function clearAllJobs() {
+  return db.prepare("DELETE FROM jobs").run().changes || 0;
+}
+
 module.exports = {
   enqueue,
   listByState,
@@ -307,7 +318,6 @@ module.exports = {
   markCompleted,
   markFailedRetryable,
   markDead,
-  clearAllJobs() {
-    return db.prepare("DELETE FROM jobs").run().changes;
-  }
+  clearAllJobs
 };
+
