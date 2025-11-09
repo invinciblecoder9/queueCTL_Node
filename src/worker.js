@@ -91,7 +91,6 @@
 
 
 
-// src/worker.js
 const { claimOne, markCompleted, markFailedRetryable, markDead, getJob } = require('./jobs');
 const { getConfig } = require('./config');
 const { exec } = require('child_process');
@@ -126,10 +125,12 @@ async function runLoop() {
         continue;
       }
 
-      console.log(`[${WORKER_ID}] claimed job ${job.id} (attempts=${job.attempts}) -> command: ${job.command}`);
+      console.log(
+        `[${WORKER_ID}] claimed job ${job.id} (attempts=${job.attempts}) -> command: ${job.command}`
+      );
 
-      // execute command
-      const child = exec(job.command, { timeout: 0 });
+      // IMPORTANT for Windows: run via a shell
+      const child = exec(job.command, { shell: true, timeout: 0 });
 
       let stdout = '';
       let stderr = '';
@@ -137,9 +138,7 @@ async function runLoop() {
       child.stderr?.on('data', (d) => { stderr += d; });
 
       const exitCode = await new Promise((resolve) => {
-        child.on('close', (code) => {
-          resolve(code === null ? 1 : code);
-        });
+        child.on('close', (code) => resolve(code === null ? 1 : code));
         child.on('error', (err) => {
           console.error(`[${WORKER_ID}] exec error`, err.message || err);
           resolve(1);
@@ -148,7 +147,6 @@ async function runLoop() {
 
       if (exitCode === 0) {
         console.log(`[${WORKER_ID}] job ${job.id} completed. stdout: ${stdout.trim()}`);
-        // mark completed (duration is computed inside markCompleted)
         markCompleted(job.id);
       } else {
         const updatedJob = getJob(job.id) || job;
@@ -156,16 +154,19 @@ async function runLoop() {
         const maxRetries = updatedJob.max_retries || 3;
 
         if (attempts > maxRetries) {
-          console.log(`[${WORKER_ID}] job ${job.id} exceeded max_retries (${maxRetries}). Moving to DLQ.`);
+          console.log(
+            `[${WORKER_ID}] job ${job.id} exceeded max_retries (${maxRetries}). Moving to DLQ.`
+          );
           markDead(job.id);
         } else {
           const base = getBackoffBase();
           const backoffSeconds = Math.pow(base, attempts);
-          console.log(`[${WORKER_ID}] job ${job.id} failed (exit ${exitCode}). attempts=${attempts}/${maxRetries}. retrying in ${backoffSeconds}s`);
+          console.log(
+            `[${WORKER_ID}] job ${job.id} failed (exit ${exitCode}). attempts=${attempts}/${maxRetries}. retrying in ${backoffSeconds}s`
+          );
           markFailedRetryable(job.id, attempts, backoffSeconds);
         }
       }
-
     } catch (err) {
       console.error(`[${WORKER_ID}] loop error`, err);
       await sleep(1000);
@@ -177,5 +178,6 @@ async function runLoop() {
 }
 
 runLoop();
+
 
 
