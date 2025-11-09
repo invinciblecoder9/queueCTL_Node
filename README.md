@@ -4,7 +4,7 @@
 
 Watch the complete working demo of `queuectl` here:
 
-👉 **Google Drive Link:** https://drive.google.com/your-video-link-here
+👉 **Google Drive Link:** [https://drive.google.com/drive/folders/1i2yYT4CKJ4VpVRAK1UB_hx-p7DxKI7gP?usp=sharing]
 
 
 `queuectl` is a **production-grade, CLI-controlled background job queue** built in Node.js.  
@@ -67,35 +67,35 @@ runtime/
 Below are the exact commands (with flags) to test each feature.
 ---
 
-# ▶️ Enqueue Jobs
-# Successful job
+### **▶️ Enqueue Jobs**
+**Successful job**
 ```
 node src/cli.js enqueue --id job_success --command "echo 'Hello Success'" --max-retries 2
 ```
 
-# Failing job
+**Failing job**
 ```
 node src/cli.js enqueue --id job_fail --command "node -e \"process.exit(1)\"" --max-retries 2
 ```
 
-# Scheduled job (runs in 30s)
+**Scheduled job (runs in 30s)**
 ```
 node src/cli.js enqueue --id job_delayed --command "echo delayed" --run-at "$(date -u -d '+30 seconds' +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-# Priority jobs
+**Priority jobs**
 ```
 node src/cli.js enqueue --id job_high --command "echo high" --priority 10
 node src/cli.js enqueue --id job_low  --command "echo low"  --priority 1
 ```
 
-# 🏃‍♂️ Start & Stop Workers
+**🏃‍♂️ Start & Stop Workers**
 ```
 node src/cli.js worker start --count 3
 node src/cli.js worker stop
 ```
 
-# 📋 List Jobs
+**📋 List Jobs**
 ```
 node src/cli.js list
 node src/cli.js list --state pending
@@ -103,20 +103,20 @@ node src/cli.js list --state completed
 node src/cli.js list --state dead
 ```
 
-# ⚰️ Dead Letter Queue
+**⚰️ Dead Letter Queue**
 ```
 node src/cli.js dlq list
 node src/cli.js dlq retry job_fail
 ```
 
-# 🧩 Configuration
+**🧩 Configuration**
 ```
 node src/cli.js config set backoff_base 2
 node src/cli.js config get backoff_base
 node src/cli.js config list
 ```
 
-# 📊 Metrics
+**📊 Metrics**
 ```
 node src/cli.js metrics
 ```
@@ -133,7 +133,7 @@ Completed jobs duration:
 ┌──────────────────┬─────────┬───────────┬───────────┐
 │ completed_count  │ avg_ms  │ min_ms    │ max_ms    │
 ```
-# 🧹 Clear all jobs (dev only)
+**🧹 Clear all jobs (dev only)**
 ```
 node src/cli.js clear
 ```
@@ -143,14 +143,14 @@ node src/cli.js clear
 
 ```queuectl``` is designed around durability, atomicity, and simplicity.
 ---
-# Job Lifecycle
+### **Job Lifecycle**
 ```
 pending → processing → completed
                  ↘
                    failed → retry → retry → dead
 ```
 ---
-# 1. Job Storage
+**1. Job Storage**
 
 Jobs are stored in SQLite ```(data/queue.db)``` with fields:
 ```
@@ -168,7 +168,7 @@ Jobs are stored in SQLite ```(data/queue.db)``` with fields:
 }
 ```
 
-# Why SQLite?
+**Why SQLite?**
 
 -Fast & reliable
 
@@ -177,8 +177,9 @@ Jobs are stored in SQLite ```(data/queue.db)``` with fields:
 -Perfect for single-node queues
 
 -Atomic row locking prevents duplicate execution
+
 ---
-# 2. Worker Execution Model
+**2. Worker Execution Model**
 
 Each worker process:
 
@@ -206,7 +207,7 @@ Workers support:
 
  -Exponential backoff
 ---
-# 3. Dead Letter Queue (DLQ)
+**3. Dead Letter Queue (DLQ)**
 
 Jobs exceeding retry attempts automatically move to dead.
 DLQ jobs can be inspected and retried manually:
@@ -215,7 +216,7 @@ queuectl dlq list
 queuectl dlq retry <id>
 ```
 
-# 4. Priority & Scheduling
+**4. Priority & Scheduling**
 
 Jobs are executed based on:
 ```
@@ -227,7 +228,7 @@ Scheduled jobs are ignored until:
 next_run_at <= now
 ```
 ---
-# 5. Config System
+**5. Config System**
 
 Config values stored in DB:
 ```
@@ -262,50 +263,25 @@ queuectl config list
 -No job cancellation or job pause
 
 -Worker polling instead of push-based
+
 ---
-#5. 🧪 Testing Instructions
-#✅ 1. Test successful job
-```
-node src/cli.js clear
-node src/cli.js enqueue --id ok1 --command "echo hi"
-node src/cli.js worker start --count 1
-sleep 2
-node src/cli.js list --state completed
-```
+#5. 📸 Dashboard Screenshot
 
-#✅ 2. Test failing job → retry → DLQ
-```
-node src/cli.js enqueue --id fail1 --command "node -e \"process.exit(1)\"" --max-retries 2
-sleep 10
-node src/cli.js dlq list
-```
+![QueueCTL Dashboard](dashboard.png)
 
-#✅ 3. Test priority ordering
-```
-node src/cli.js enqueue --id p1 --command "echo low" --priority 1
-node src/cli.js enqueue --id p2 --command "echo high" --priority 10
-node src/cli.js list --state pending
-```
+---
+# 6. 🧪 Testing Instructions
 
-#✅ 4. Test delayed run
-```
-node src/cli.js enqueue --id d1 --command "echo delay" --run-at "$(date -u -d '+20 seconds' +%Y-%m-%dT%H:%M:%SZ)"
-node src/cli.js worker start --count 1
-```
+### ✅ Automated Test Script (PowerShell)
 
-#✅ 5. Test duplicate execution protection
-```
-rm -f /tmp/dup.log
-node src/cli.js enqueue --id dup --command "bash -c 'echo run >> /tmp/dup.log'"
-node src/cli.js worker start --count 5
-sleep 3
-node src/cli.js worker stop
-wc -l /tmp/dup.log
-```
+You can run **all tests automatically** using the included script:
 
-Should output 1.
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts/test_all.ps1
+```
+---
 
-#✅ 6. Test metrics
+# ✅ 7. Test metrics
 ```
 node src/cli.js metrics
 ```
@@ -331,4 +307,5 @@ node src/cli.js metrics
 -persistence
 
 Designed to mimic real-world queue systems while remaining minimal and easy to understand.
+
 
